@@ -165,10 +165,10 @@ if __name__ == "__main__":
     PASSWORD = ""
 
     #Number of retries if any request fails. 0 for unlimited
-    MAX_RETRIES = 5
+    MAX_RETRIES = 10
 
-    schedule.every().tuesday.at("00:00").do(Task)
-    schedule.every().thursday.at("00:00").do(Task)
+    schedule.every().tuesday.at("00:01").do(Task)
+    schedule.every().thursday.at("00:01").do(Task)
     
     print("Script running")
 
