@@ -1,14 +1,20 @@
+from dataclasses import dataclass
 import requests as req
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import time
+import schedule
 
 def GetDays():
     freeSlots = {}
     bookingQuery = {}
+    tries = 0
     while True:
         try:
+            tries = tries + 1
+
             date = datetime.now()
+
             DATA = {
                 "year": date.year,
                 "week": int(date.strftime("%U"))+1, #https://www.w3schools.com/python/python_datetime.asp
@@ -30,9 +36,15 @@ def GetDays():
                 #freeSlots[currDay] = slots
                 bookingQuery[currDay] = urlQuery
             
+            if len(bookingQuery) == 0:
+                raise Exception("Empty list of days")
+
             return (freeSlots, bookingQuery)
-        except Exception:
-            print("Can't get badminton info, retry in 5 seconds")
+        except Exception as e:
+            if tries > MAX_RETRIES and MAX_RETRIES != 0:
+                print("Max retries reached, exiting")
+                exit()
+            print("Exception: "+str(e)+".\nCan't get badminton info, retry in 5 sec, try: ["+str(tries)+"/"+str(MAX_RETRIES)+"]")
             time.sleep(5)
 
 def Auth(client):
@@ -57,13 +69,30 @@ def Auth(client):
 
             return r.json()["Success"]
         except Exception:
-            print("Login problem retries in 5 sec, try: "+str(tries))
+            if tries > MAX_RETRIES and MAX_RETRIES != 0:
+                print("Max retries reached, exiting")
+                exit()
+            print("Login problem retries in 5 sec, try: ["+str(tries)+"/"+str(MAX_RETRIES)+"]")
             time.sleep(5)
 
-def BookSession(client):
+def BookSession(client, query):
+    tries = 0
     while True:
         try:
-            r = client.get("https://www.mittlivsstil.se"+query["onsdag"])
+            tries = tries+1
+            daysOfWeek = {
+                1: "tisdag",
+                2: "onsdag",
+                3: "torsdag",
+            }
+            date = datetime.now()
+            day = daysOfWeek.get(date.weekday())
+
+            if day == None:
+                raise Exception("Unvalid day used")
+
+            tries = tries + 1
+            r = client.get("https://www.mittlivsstil.se"+query[day])
             booking_soup = BeautifulSoup(r.content, "html.parser")
             
             ActivityId = booking_soup.find("input", {"name": "ActivityId"})["value"]
@@ -91,6 +120,9 @@ def BookSession(client):
                 "WaitingList": WaitingList
             }
             r = client.post("https://www.mittlivsstil.se/umbraco/Surface/Booking/AddBooking?locale=sv", data=data)
+            if r.ok != True:
+                raise Exception("Couldn't reach booking site")
+
             success_soup = BeautifulSoup(r.content, "html.parser")
             success = success_soup.find("a", {"class": "facebook-post-ui"})
 
@@ -98,16 +130,15 @@ def BookSession(client):
             if(success != None):
                 return data
 
-            return False
-        except Exception:
-            print("Can't book session, retry in 5 seconds")
+            raise Exception("Couldn't book session")
+        except Exception as e:
+            if tries > MAX_RETRIES and MAX_RETRIES != 0:
+                print("Max retries reached, exiting")
+                exit()
+            print("Exception: "+str(e)+".\nCan't book session, retry in 5 sec, try: ["+str(tries)+"/"+str(MAX_RETRIES)+"]")
             time.sleep(5)
 
-if __name__ == "__main__":
-    #Credentials, could be in a external 'secret' file
-    EMAIL = ""
-    PASSWORD = ""
-
+def Task():
     #Get badminton days and their information
     (slots, query) = GetDays()
 
@@ -121,8 +152,26 @@ if __name__ == "__main__":
         exit()
 
     #Book badminton
-    booking = BookSession(client)
+    booking = BookSession(client, query)
     if booking != False:
         print(f"Booking Successful\nStart: {booking['StartDate']}\nStop: {booking['StopDate']}")
+        exit()
     else:
         print("Booking failed, maybe you have already booked it")
+
+if __name__ == "__main__":
+    #Credentials, could be in a external 'secret' file
+    EMAIL = ""
+    PASSWORD = ""
+
+    #Number of retries if any request fails. 0 for unlimited
+    MAX_RETRIES = 5
+
+    schedule.every().tuesday.at("00:00").do(Task)
+    schedule.every().thursday.at("00:00").do(Task)
+    
+    print("Script running")
+
+    while True:
+        schedule.run_pending()
+        time.sleep(5)
